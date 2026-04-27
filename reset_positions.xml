@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<reset_positions>
+  <!-- Format: <joint id="N">POSITION_IN_RADIANS</joint> -->
+  <!-- 示例：下面列出所有关节的占位值，请按需修改为你的 20 个实际初始位置 -->
+  <!-- RLeg1 - 6 -->
+  <joint id="12">0.0</joint>
+  <joint id="13">0.0</joint>
+  <joint id="18">0.0</joint>
+  <joint id="14">0.0</joint>
+  <joint id="15">0.0</joint>
+  <joint id="16">0.0</joint>
+  <!-- LLeg1 - 6 -->
+  <joint id="11">0.0</joint>
+  <joint id="10">0.0</joint>
+  <joint id="19">0.0</joint>
+  <joint id="20">0.0</joint>
+  <joint id="22">0.0</joint>
+  <joint id="21">0.0</joint>
+  <!-- RArm1 - 4 -->
+  <joint id="6">0.0</joint>
+  <joint id="2">0.0</joint>
+  <joint id="1">0.0</joint>
+  <joint id="5">0.0</joint>
+  <!-- LArm1 - 4 -->
+  <joint id="7">0.0</joint>
+  <joint id="3">0.0</joint>
+  <joint id="4">0.0</joint>
+  <joint id="0">0.0</joint>
+</reset_positions>

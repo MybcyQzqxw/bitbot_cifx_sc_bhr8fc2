@@ -8,6 +8,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
 
 enum Events
 {
@@ -25,6 +26,17 @@ enum class States : bitbot::StateId
 };
 
 extern bitbot::JointElmoPushrod *joint_x;
+extern std::unordered_map<int, bitbot::JointElmo *> joints_elmo_map;
+extern std::unordered_map<int, bitbot::JointElmoPushrod *> joints_pushrod_map;
+
+// 复位位置接口：用户可为每个关节设置复位目标位置（单位：弧度）
+extern std::unordered_map<int, double> joint_reset_positions_elmo;
+extern std::unordered_map<int, double> joint_reset_positions_pushrod;
+
+// 设置/清除复位位置
+void SetJointResetPosition(int id, double pos);
+void ClearJointResetPositions();
+void LoadResetPositionsFromXML(const std::string &filename);
 
 struct UserData
 {
