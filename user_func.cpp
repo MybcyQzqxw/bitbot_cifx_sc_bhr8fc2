@@ -27,6 +27,9 @@ std::unordered_map<int, bitbot::JointElmoPushrod *> joints_pushrod_map;
 std::unordered_map<int, double> joint_reset_positions_elmo;
 std::unordered_map<int, double> joint_reset_positions_pushrod;
 
+// 从 reset_positions.xml 读取的全局复位运动时长（秒），默认 20s
+double reset_duration = 20.0;
+
 void SetJointResetPosition(int id, double pos)
 {
   // 优先尝试放到 elmo map，否则放到 pushrod map
@@ -50,27 +53,57 @@ void LoadResetPositionsFromXML(const std::string &filename)
     std::cout << "LoadResetPositionsFromXML: file not found: " << filename << std::endl;
     return;
   }
+  // 读取整个文件到字符串，先查找 duration 信息（支持根节点属性或单独元素），再用正则匹配 joint
+  std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
 
-  // 简单正则匹配: <joint id="(\d+)">([\-0-9.eE]+)</joint>
-  std::regex re(R"(<joint\s+id=\"(\d+)\">\s*([\-0-9.eE]+)\s*</joint>)");
-  std::string line;
-  while (std::getline(ifs, line))
+  // 支持 <reset_positions duration="20.0"> 或 <duration>20.0</duration>
+  std::smatch m_attr;
+  std::regex re_attr(R"(<reset_positions[^>]*\bduration\s*=\s*\"([\-0-9.eE]+)\"[^>]*>)");
+  if (std::regex_search(content, m_attr, re_attr))
   {
-    std::smatch m;
-    if (std::regex_search(line, m, re))
+    try { reset_duration = std::stod(m_attr[1].str()); }
+    catch (...) {}
+  }
+  else
+  {
+    std::smatch m_elem;
+    std::regex re_elem(R"(<duration>\s*([\-0-9.eE]+)\s*</duration>)");
+    if (std::regex_search(content, m_elem, re_elem))
     {
-      try
+      try { reset_duration = std::stod(m_elem[1].str()); }
+      catch (...) {}
+    }
+  }
+
+  // 简单正则匹配: <joint id="(\d+)" [reset="0|1"]>VALUE</joint>
+  std::regex re(R"(<joint\s+id=\"(\d+)\"(?:\s+reset=\"([01])\")?\s*>\s*([\-0-9.eE]+)\s*</joint>)");
+  std::sregex_iterator it(content.begin(), content.end(), re);
+  std::sregex_iterator end;
+  for (; it != end; ++it)
+  {
+    try
+    {
+      int id = std::stoi((*it)[1].str());
+      std::string reset_flag = (*it)[2].str(); // may be empty
+      double pos = std::stod((*it)[3].str());
+      bool do_reset = true;
+      if (!reset_flag.empty())
+        do_reset = (reset_flag == "1");
+
+      if (do_reset)
       {
-        int id = std::stoi(m[1].str());
-        double pos = std::stod(m[2].str());
         if (joints_elmo_map.find(id) != joints_elmo_map.end())
           joint_reset_positions_elmo[id] = pos;
         else
           joint_reset_positions_pushrod[id] = pos;
-        std::cout << "LoadResetPositionsFromXML: joint " << id << " -> " << pos << std::endl;
+        std::cout << "LoadResetPositionsFromXML: joint " << id << " -> " << pos << " (reset=1)" << std::endl;
       }
-      catch (...) {}
+      else
+      {
+        std::cout << "LoadResetPositionsFromXML: joint " << id << " skip reset (reset=0)" << std::endl;
+      }
     }
+    catch (...) {}
   }
 }
 
@@ -184,7 +217,7 @@ void StateInitPos(const bitbot::KernelInterface &kernel, CifxKernel::ExtraData &
   static double start_time = 0;
   static std::unordered_map<int, double> initial_positions_elmo;
   static std::unordered_map<int, double> initial_positions_pushrod;
-  static constexpr double duration = 20.0; // 秒
+  static constexpr double reset_duration_const = 20.0; // 秒
 
   double time = kernel.GetPeriodsCount() * _ControlT;
 
@@ -200,13 +233,43 @@ void StateInitPos(const bitbot::KernelInterface &kernel, CifxKernel::ExtraData &
     {
       initial_positions_pushrod[p.first] = p.second->GetActualPosition();
     }
+    // 对需要复位的关节切换到位置控制（CSP）并初始化目标位置；未被标记复位的关节将把控制电流置为 0
+    for (const auto &p : joints_elmo_map)
+    {
+      int id = p.first;
+      auto j = p.second;
+      if (joint_reset_positions_elmo.count(id))
+      {
+        j->SetMode(bitbot::CANopenMotorMode::CSP);
+        j->SetTargetPosition(initial_positions_elmo[id]);
+      }
+      else
+      {
+        j->SetTargetCurrent(0);
+      }
+    }
+    for (const auto &p : joints_pushrod_map)
+    {
+      int id = p.first;
+      auto j = p.second;
+      if (joint_reset_positions_pushrod.count(id))
+      {
+        j->SetMode(bitbot::CANopenMotorMode::CSP);
+        j->SetTargetPosition(initial_positions_pushrod[id]);
+      }
+      else
+      {
+        j->SetTargetCurrent(0);
+      }
+    }
     init = true;
   }
 
-  double t = time - start_time;
-  double s = 0.0;
-  if (t < duration)
-    s = (1.0 - std::cos(M_PI * t / duration)) / 2.0; // 余弦插值系数
+    double t = time - start_time;
+    double duration_val = reset_duration;
+    double s = 0.0;
+    if (t < duration_val)
+      s = (1.0 - std::cos(M_PI * t / duration_val)) / 2.0; // 余弦插值系数
 
   // 更新 elmo 关节目标位姿
   for (auto &p : joints_elmo_map)
@@ -218,8 +281,17 @@ void StateInitPos(const bitbot::KernelInterface &kernel, CifxKernel::ExtraData &
     if (joint_reset_positions_elmo.count(id))
       target = joint_reset_positions_elmo[id];
 
-    double pos = (t >= duration) ? target : (init_pos + (target - init_pos) * s);
-    j->SetTargetPosition(pos);
+    if (joint_reset_positions_elmo.count(id))
+    {
+      // 平滑插值（余弦平滑）
+      double pos = (t >= duration_val) ? target : (init_pos + (target - init_pos) * s);
+      j->SetTargetPosition(pos);
+    }
+    else
+    {
+      // 未标记复位：不施加位置控制，保持不驱动（电流置零）
+      j->SetTargetCurrent(0);
+    }
   }
 
   // 更新 pushrod 关节目标位姿
@@ -232,8 +304,15 @@ void StateInitPos(const bitbot::KernelInterface &kernel, CifxKernel::ExtraData &
     if (joint_reset_positions_pushrod.count(id))
       target = joint_reset_positions_pushrod[id];
 
-    double pos = (t >= duration) ? target : (init_pos + (target - init_pos) * s);
-    j->SetTargetPosition(pos);
+    if (joint_reset_positions_pushrod.count(id))
+    {
+      double pos = (t >= duration_val) ? target : (init_pos + (target - init_pos) * s);
+      j->SetTargetPosition(pos);
+    }
+    else
+    {
+      j->SetTargetCurrent(0);
+    }
   }
 }
 
