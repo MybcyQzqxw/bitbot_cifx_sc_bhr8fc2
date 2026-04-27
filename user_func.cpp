@@ -1,6 +1,9 @@
 #include "user_func.h"
 #include "bitbot_cifx/device/joint_elmo.h"
 #include "bitbot_cifx/device/joint_elmo_pushrod.h"
+// 需要完整类型以支持在模板中使用 dynamic_cast
+#include "bitbot_cifx/device/imu_mti300.h"
+#include "bitbot_cifx/device/force_sri6d.h"
 
 #include <chrono>
 #include <iostream>
@@ -14,8 +17,7 @@
 constexpr double deg2rad = M_PI / 180.0;
 constexpr double rad2deg = 180.0 / M_PI;
 
-bitbot::JointElmo *joint1 = nullptr, *joint2 = nullptr, *joint3 = nullptr;
-bitbot::JointElmoPushrod *joint4 = nullptr;
+// 所有关节通过 `joints_elmo_map` 与 `joints_pushrod_map` 管理
 
 // 全部关节容器：id -> 指针
 std::unordered_map<int, bitbot::JointElmo *> joints_elmo_map;
@@ -97,7 +99,7 @@ void ConfigFunc(const bitbot::CifxBus &bus, UserData &)
       j->SetMode(bitbot::CANopenMotorMode::CST);
       j->SetTargetPosition(j->GetActualPosition());
 
-      // 不对单独的 joint1/2/3 进行特殊赋值，所有关节通过 joints_elmo_map 暴露
+      // 所有 elmo 关节通过 `joints_elmo_map` 暴露
     }
     else
     {
@@ -119,7 +121,7 @@ void ConfigFunc(const bitbot::CifxBus &bus, UserData &)
       j->SetMode(bitbot::CANopenMotorMode::CST);
       j->SetTargetPosition(j->GetActualPosition());
 
-      // 不对单独的 joint4 进行特殊赋值，所有 pushrod 通过 joints_pushrod_map 暴露
+      // 所有 pushrod 关节通过 `joints_pushrod_map` 暴露
     }
     else
     {
@@ -256,42 +258,47 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
   
   if (!init)
   {
-    target_pos1 = joint1->GetActualPosition();
-    target_pos2 = joint2->GetActualPosition();
-    target_pos3 = joint3->GetActualPosition();
-    target_pos4 = joint4->GetActualPosition();
-
-    joint1->SetTargetCurrent(0);
-    joint1->SetMode(bitbot::CANopenMotorMode::CST);
-    joint2->SetTargetCurrent(0);
-    joint2->SetMode(bitbot::CANopenMotorMode::CST);
-    joint3->SetTargetCurrent(0);
-    joint3->SetMode(bitbot::CANopenMotorMode::CST);
-    joint4->SetTargetCurrent(0);
-    joint4->SetMode(bitbot::CANopenMotorMode::CST);
+    // 记录每个关节的目标保持位置
+    static std::unordered_map<int, double> target_positions;
+    for (const auto &p : joints_elmo_map)
+    {
+      target_positions[p.first] = p.second->GetActualPosition();
+      p.second->SetTargetCurrent(0);
+      p.second->SetMode(bitbot::CANopenMotorMode::CST);
+    }
+    for (const auto &p : joints_pushrod_map)
+    {
+      target_positions[p.first] = p.second->GetActualPosition();
+      p.second->SetTargetCurrent(0);
+      p.second->SetMode(bitbot::CANopenMotorMode::CST);
+    }
+    // 将本地 target_posX 映射到外部可见的静态变量（按需使用）
+    target_pos1 = target_positions.count(0) ? target_positions[0] : 0.0;
+    (void)target_pos1; // 兼容老变量名（如果仍被使用）
     init = true;
   }
 
-  // PD 控制: tau = Kp * (target - actual) - Kd * velocity
-  double err1 = target_pos1 - joint1->GetActualPosition();
-  double err2 = target_pos2 - joint2->GetActualPosition();
-  double err3 = target_pos3 - joint3->GetActualPosition();
-  double err4 = target_pos4 - joint4->GetActualPosition();
-
-  double vel1 = joint1->GetActualVelocity();
-  double vel2 = joint2->GetActualVelocity();
-  double vel3 = joint3->GetActualVelocity();
-  double vel4 = joint4->GetActualVelocity();
-
-  double tau1 = Kp1 * err1 - Kd1 * vel1;
-  double tau2 = Kp2 * err2 - Kd2 * vel2;
-  double tau3 = Kp3 * err3 - Kd3 * vel3;
-  double tau4 = Kp4 * err4 - Kd4 * vel4;
-
-  joint1->SetTargetCurrent(tau1);
-  joint2->SetTargetCurrent(tau2);
-  joint3->SetTargetCurrent(tau3);
-  joint4->SetTargetCurrent(tau4);
+  // PD 控制：对所有注册的关节执行相同控制律
+  for (const auto &p : joints_elmo_map)
+  {
+    int id = p.first;
+    auto j = p.second;
+    double target = joint_reset_positions_elmo.count(id) ? joint_reset_positions_elmo[id] : j->GetActualPosition();
+    double err = target - j->GetActualPosition();
+    double vel = j->GetActualVelocity();
+    double tau = Kp1 * err - Kd1 * vel;
+    j->SetTargetCurrent(tau);
+  }
+  for (const auto &p : joints_pushrod_map)
+  {
+    int id = p.first;
+    auto j = p.second;
+    double target = joint_reset_positions_pushrod.count(id) ? joint_reset_positions_pushrod[id] : j->GetActualPosition();
+    double err = target - j->GetActualPosition();
+    double vel = j->GetActualVelocity();
+    double tau = Kp4 * err - Kd4 * vel;
+    j->SetTargetCurrent(tau);
+  }
 }
 
 void StateToFallPos2(const bitbot::KernelInterface &kernel, CifxKernel::ExtraData &extra_data, UserData &user_data)
@@ -315,40 +322,42 @@ void StateToFallPos2(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
   
   if (!init)
   {
-    target_pos1 = joint1->GetActualPosition();
-    target_pos2 = joint2->GetActualPosition();
-    target_pos3 = joint3->GetActualPosition();
-    target_pos4 = joint4->GetActualPosition();
-
-    joint1->SetTargetCurrent(0);
-    joint1->SetMode(bitbot::CANopenMotorMode::CST);
-    joint2->SetTargetCurrent(0);
-    joint2->SetMode(bitbot::CANopenMotorMode::CST);
-    joint3->SetTargetCurrent(0);
-    joint3->SetMode(bitbot::CANopenMotorMode::CST);
-    joint4->SetTargetCurrent(0);
-    joint4->SetMode(bitbot::CANopenMotorMode::CST);
+    static std::unordered_map<int, double> target_positions;
+    for (const auto &p : joints_elmo_map)
+    {
+      target_positions[p.first] = p.second->GetActualPosition();
+      p.second->SetTargetCurrent(0);
+      p.second->SetMode(bitbot::CANopenMotorMode::CST);
+    }
+    for (const auto &p : joints_pushrod_map)
+    {
+      target_positions[p.first] = p.second->GetActualPosition();
+      p.second->SetTargetCurrent(0);
+      p.second->SetMode(bitbot::CANopenMotorMode::CST);
+    }
+    target_pos1 = target_positions.count(0) ? target_positions[0] : 0.0;
+    (void)target_pos1;
     init = true;
   }
-
-  // PD 控制: tau = Kp * (target - actual) - Kd * velocity
-  double err1 = target_pos1 - joint1->GetActualPosition();
-  double err2 = target_pos2 - joint2->GetActualPosition();
-  double err3 = target_pos3 - joint3->GetActualPosition();
-  double err4 = target_pos4 - joint4->GetActualPosition();
-
-  double vel1 = joint1->GetActualVelocity();
-  double vel2 = joint2->GetActualVelocity();
-  double vel3 = joint3->GetActualVelocity();
-  double vel4 = joint4->GetActualVelocity();
-
-  double tau1 = Kp1 * err1 - Kd1 * vel1;
-  double tau2 = Kp2 * err2 - Kd2 * vel2;
-  double tau3 = Kp3 * err3 - Kd3 * vel3;
-  double tau4 = Kp4 * err4 - Kd4 * vel4;
-
-  joint1->SetTargetCurrent(tau1);
-  joint2->SetTargetCurrent(tau2);
-  joint3->SetTargetCurrent(tau3);
-  joint4->SetTargetCurrent(tau4);
+  // 对所有注册关节执行 PD 控制
+  for (const auto &p : joints_elmo_map)
+  {
+    int id = p.first;
+    auto j = p.second;
+    double target = joint_reset_positions_elmo.count(id) ? joint_reset_positions_elmo[id] : j->GetActualPosition();
+    double err = target - j->GetActualPosition();
+    double vel = j->GetActualVelocity();
+    double tau = Kp1 * err - Kd1 * vel;
+    j->SetTargetCurrent(tau);
+  }
+  for (const auto &p : joints_pushrod_map)
+  {
+    int id = p.first;
+    auto j = p.second;
+    double target = joint_reset_positions_pushrod.count(id) ? joint_reset_positions_pushrod[id] : j->GetActualPosition();
+    double err = target - j->GetActualPosition();
+    double vel = j->GetActualVelocity();
+    double tau = Kp4 * err - Kd4 * vel;
+    j->SetTargetCurrent(tau);
+  }
 }

@@ -9,6 +9,16 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+// 保证头文件自包含性
+#include <optional>
+#include <vector>
+
+// 前向声明，避免在头文件中包含过多实现依赖
+namespace bitbot {
+class JointElmo;
+class ImuMti300;
+class ForceSri6d;
+}
 
 enum Events
 {
