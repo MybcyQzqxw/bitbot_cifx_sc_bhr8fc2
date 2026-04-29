@@ -300,7 +300,7 @@ void LoadFall1PositionsFromXML(const std::string &filename)
   }
 
   // 验证：要求 t1 和 t2 均为正，且包含下面这 8 个关节
-  const std::vector<int> required_ids = {6, 5, 7, 0, 14, 15, 20, 22};
+  const std::vector<int> required_ids = {6, 5, 7, 0, 18, 15, 19, 22};
   bool ok = true;
   if (!(parsed_t1 > 0.0))
   {
@@ -720,7 +720,7 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
 
     // 确保参与运动的关节处于 CST 模式，并清零初始输出以避免突变
     const int stage1_ids[] = {6, 5, 7, 0};
-    const int stage2_ids[] = {14, 15, 20, 22};
+    const int stage2_ids[] = {18, 15, 19, 22};
     for (int id : stage1_ids)
     {
       if (joints_elmo_map.count(id))
@@ -745,6 +745,28 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
       {
         joints_pushrod_map[id]->SetMode(bitbot::CANopenMotorMode::CST);
         joints_pushrod_map[id]->SetTargetCurrent(0);
+      }
+    }
+
+    // 额外：确保其它关节也切到 CST 并清零初始输出，以便后续 PD 控制可以生效（保持进入本函数时的位置）
+    for (const auto &q : joints_elmo_map)
+    {
+      int id = q.first;
+      if (std::find(std::begin(stage1_ids), std::end(stage1_ids), id) == std::end(stage1_ids) &&
+          std::find(std::begin(stage2_ids), std::end(stage2_ids), id) == std::end(stage2_ids))
+      {
+        q.second->SetMode(bitbot::CANopenMotorMode::CST);
+        q.second->SetTargetCurrent(0);
+      }
+    }
+    for (const auto &q : joints_pushrod_map)
+    {
+      int id = q.first;
+      if (std::find(std::begin(stage1_ids), std::end(stage1_ids), id) == std::end(stage1_ids) &&
+          std::find(std::begin(stage2_ids), std::end(stage2_ids), id) == std::end(stage2_ids))
+      {
+        q.second->SetMode(bitbot::CANopenMotorMode::CST);
+        q.second->SetTargetCurrent(0);
       }
     }
 
@@ -787,10 +809,12 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
     switch (id)
     {
       case 6: return 0.0;
+      case 5: return 1.5;
       case 7: return 0.0;
-      case 14: return 0.6;
+      case 0: return 1.5;
+      case 18: return -0.270;
       case 15: return -0.48;
-      case 20: return 0.62;
+      case 19: return -0.255;
       case 22: return -0.49;
       default: return 0.0;
     }
@@ -802,7 +826,7 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
 
   // 运动阶段集合
   const std::unordered_set<int> stage1_set = {6, 5, 7, 0};
-  const std::unordered_set<int> stage2_set = {14, 15, 20, 22};
+  const std::unordered_set<int> stage2_set = {18, 15, 19, 22};
 
   // 为每个关节计算期望位置并下发电流（CST）
   auto process_joint = [&](int id, auto jptr, bool isPushrod)
@@ -824,10 +848,10 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
       double s = (tt <= 0.0) ? 0.0 : (1.0 - std::cos(M_PI * std::min(tt, t2) / t2)) / 2.0;
       desired = (tt >= t2) ? final_target : (init_pos + (final_target - init_pos) * s);
     }
-    else if (!stage1_set.count(id) && !stage2_set.count(id))
+    else
     {
-      // 保持不动：把期望设为当前实际位姿以最小化输出
-      desired = jptr->GetActualPosition();
+      // 非参与运动的关节：将期望保持为进入本函数时记录的初始位姿，使用 PD 回路维持此位置
+      desired = init_pos;
     }
 
     double act = jptr->GetActualPosition();

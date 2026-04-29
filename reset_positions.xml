@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<reset_positions duration="10.0">
+<reset_positions duration="5.0">
   <!--
     Format:
       - 指定每个关节位置: <joint id="N">POSITION_IN_RADIANS</joint>
