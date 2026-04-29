@@ -205,10 +205,18 @@ void LoadFall1PositionsFromXML(const std::string &filename)
   {
     std::cout << "LoadFall1PositionsFromXML: file not found: " << filename << std::endl;
     fall1_loaded = false;
+    // clear previous parsed data to avoid accidental reuse
+    fall1_t1 = 0.0;
+    fall1_t2 = 0.0;
+    fall1_targets.clear();
     return;
   }
 
   std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+  // 解析到临时容器，最后验证是否包含所有需要的字段
+  double parsed_t1 = 0.0;
+  double parsed_t2 = 0.0;
+  std::unordered_map<int, double> parsed_targets;
 
   // 根节点属性或元素形式的 t1 / t2
   std::smatch m_t1_attr;
@@ -217,7 +225,7 @@ void LoadFall1PositionsFromXML(const std::string &filename)
   std::regex re_t2_attr(R"(<fall1_positions[^>]*\bt2\s*=\s*\"([\-0-9.eE]+)\"[^>]*>)");
   if (std::regex_search(content, m_t1_attr, re_t1_attr))
   {
-    try { fall1_t1 = std::stod(m_t1_attr[1].str()); } catch(...) {}
+    try { parsed_t1 = std::stod(m_t1_attr[1].str()); } catch(...) { parsed_t1 = 0.0; }
   }
   else
   {
@@ -225,13 +233,13 @@ void LoadFall1PositionsFromXML(const std::string &filename)
     std::regex re_t1_elem(R"(<t1>\s*([\-0-9.eE]+)\s*</t1>)");
     if (std::regex_search(content, m_t1_elem, re_t1_elem))
     {
-      try { fall1_t1 = std::stod(m_t1_elem[1].str()); } catch(...) {}
+      try { parsed_t1 = std::stod(m_t1_elem[1].str()); } catch(...) { parsed_t1 = 0.0; }
     }
   }
 
   if (std::regex_search(content, m_t2_attr, re_t2_attr))
   {
-    try { fall1_t2 = std::stod(m_t2_attr[1].str()); } catch(...) {}
+    try { parsed_t2 = std::stod(m_t2_attr[1].str()); } catch(...) { parsed_t2 = 0.0; }
   }
   else
   {
@@ -239,27 +247,62 @@ void LoadFall1PositionsFromXML(const std::string &filename)
     std::regex re_t2_elem(R"(<t2>\s*([\-0-9.eE]+)\s*</t2>)");
     if (std::regex_search(content, m_t2_elem, re_t2_elem))
     {
-      try { fall1_t2 = std::stod(m_t2_elem[1].str()); } catch(...) {}
+      try { parsed_t2 = std::stod(m_t2_elem[1].str()); } catch(...) { parsed_t2 = 0.0; }
     }
   }
 
   // 解析 joint 条目，格式: <joint id="6">VALUE</joint>
-  std::regex re(R"(<joint\s+id=\"(\d+)\"\s*>\s*([\-0-9.eE]+)\s*</joint>)");
+  std::regex re(R"(<joint\s+id=\"(\d+)\"(?:\s+reset=\"([01])\")?\s*>\s*([\-0-9.eE]+)\s*</joint>)");
   std::sregex_iterator it(content.begin(), content.end(), re);
   std::sregex_iterator end;
-  fall1_targets.clear();
   for (; it != end; ++it)
   {
     try
     {
       int id = std::stoi((*it)[1].str());
-      double pos = std::stod((*it)[2].str());
-      fall1_targets[id] = pos;
-      std::cout << "LoadFall1PositionsFromXML: joint " << id << " -> " << pos << std::endl;
+      double pos = std::stod((*it)[3].str());
+      parsed_targets[id] = pos;
+      std::cout << "LoadFall1PositionsFromXML: parsed joint " << id << " -> " << pos << std::endl;
     }
     catch (...) {}
   }
 
+  // 验证：要求 t1 和 t2 均为正，且包含下面这 8 个关节
+  const std::vector<int> required_ids = {6, 5, 7, 0, 14, 15, 20, 22};
+  bool ok = true;
+  if (!(parsed_t1 > 0.0))
+  {
+    std::cout << "LoadFall1PositionsFromXML: missing or invalid t1" << std::endl;
+    ok = false;
+  }
+  if (!(parsed_t2 > 0.0))
+  {
+    std::cout << "LoadFall1PositionsFromXML: missing or invalid t2" << std::endl;
+    ok = false;
+  }
+  for (int id : required_ids)
+  {
+    if (parsed_targets.find(id) == parsed_targets.end())
+    {
+      std::cout << "LoadFall1PositionsFromXML: missing target for joint " << id << std::endl;
+      ok = false;
+    }
+  }
+
+  if (!ok)
+  {
+    std::cout << "LoadFall1PositionsFromXML: incomplete configuration, aborting load (fall1 not enabled)" << std::endl;
+    fall1_loaded = false;
+    fall1_t1 = 0.0;
+    fall1_t2 = 0.0;
+    fall1_targets.clear();
+    return;
+  }
+
+  // 验证通过：提交到全局变量
+  fall1_t1 = parsed_t1;
+  fall1_t2 = parsed_t2;
+  fall1_targets = std::move(parsed_targets);
   fall1_loaded = true;
 }
 
@@ -621,7 +664,7 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
 {
   // 在进入此状态时，假定所有关节已处于 CST（电流/力矩）模式。
   // 两阶段顺序运动：
-  //  - 阶段1 (t1)：关节 6,7 运动到目标
+  //  - 阶段1 (t1)：关节顺序 6,5,7,0（与 fall1_positions.xml 中定义的阶段1一致）运动到目标
   //  - 阶段2 (t2)：关节 14,15,20,22 运动到目标
   static bool init = false;
   static double start_time = 0.0;
@@ -641,7 +684,7 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
       init_positions[p.first] = p.second->GetActualPosition();
 
     // 确保参与运动的关节处于 CST 模式，并清零初始输出以避免突变
-    const int stage1_ids[] = {6, 7};
+    const int stage1_ids[] = {6, 5, 7, 0};
     const int stage2_ids[] = {14, 15, 20, 22};
     for (int id : stage1_ids)
     {
@@ -675,9 +718,23 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
 
   double t = time - start_time;
   double total = reset_duration > 0.0 ? reset_duration : 10.0; // 兜底
-  // 使用 `fall1_positions.xml` 中的 t1/t2；若未提供则使用兜底时长分配
-  double t1 = (fall1_loaded && fall1_t1 > 0.0) ? fall1_t1 : (total);
-  double t2 = (fall1_loaded && fall1_t2 > 0.0) ? fall1_t2 : (total);
+  // 使用 `fall1_positions.xml` 中的 t1/t2 和关节目标：
+  // 如果文件成功加载（fall1_loaded==true），将严格使用其中的 t1/t2 和对应目标。
+  // 若未加载或加载失败，则回退到基于 `reset_duration` 的合理默认值。
+  double t1 = 0.0, t2 = 0.0;
+  if (fall1_loaded && fall1_t1 > 0.0 && fall1_t2 > 0.0)
+  {
+    t1 = fall1_t1;
+    t2 = fall1_t2;
+  }
+  else
+  {
+    const double fallback = (reset_duration > 0.0) ? (reset_duration * 0.5) : 5.0;
+    t1 = fallback;
+    t2 = fallback;
+    if (!fall1_loaded)
+      std::cout << "StateToFallPos1: fall1_positions.xml not loaded; using fallback t1/t2=" << fallback << std::endl;
+  }
 
   // 帮助 lambda: 获取目标复位位置（优先使用 joint_reset_positions_*，否则使用硬编码备选值）
   auto get_reset_target = [&](int id) -> double {
@@ -706,7 +763,7 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
   const double Kd = 1.0;
 
   // 运动阶段集合
-  const std::unordered_set<int> stage1_set = {6, 7};
+  const std::unordered_set<int> stage1_set = {6, 5, 7, 0};
   const std::unordered_set<int> stage2_set = {14, 15, 20, 22};
 
   // 为每个关节计算期望位置并下发电流（CST）
