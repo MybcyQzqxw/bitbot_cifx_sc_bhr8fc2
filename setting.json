@@ -25,6 +25,11 @@
       "kb_key": "p"
     },
     {
+      "event": "maintain_pos",
+      "label": "保持",
+      "kb_key": "t"
+    },
+    {
       "event": "to_fall_pos1",
       "label": "摔倒1",
       "kb_key": "1"

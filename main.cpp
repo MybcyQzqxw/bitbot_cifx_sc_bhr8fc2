@@ -33,6 +33,9 @@ int main(int argc, char const *argv[])
 	kernel.RegisterEvent("init_pos", static_cast<bitbot::EventId>(Events::InitPos), [](bitbot::EventValue, UserData &)
 											 { return static_cast<bitbot::StateId>(States::InitPos); });
 
+	kernel.RegisterEvent("maintain_pos", static_cast<bitbot::EventId>(Events::MaintainPos), [](bitbot::EventValue, UserData &)
+											 { return static_cast<bitbot::StateId>(States::MaintainPos); });
+											 
 	kernel.RegisterEvent("to_fall_pos1", static_cast<bitbot::EventId>(Events::ToFallPos1), [](bitbot::EventValue, UserData &)
 											 { return static_cast<bitbot::StateId>(States::ToFallPos1); });
 
@@ -41,7 +44,9 @@ int main(int argc, char const *argv[])
 											 
 	kernel.RegisterState("waiting", static_cast<bitbot::StateId>(States::Waiting), &StateWaiting, {static_cast<bitbot::EventId>(Events::InitPos)});
 	
-	kernel.RegisterState("init_pos", static_cast<bitbot::StateId>(States::InitPos), &StateInitPos, {static_cast<bitbot::EventId>(Events::ToFallPos1), static_cast<bitbot::EventId>(Events::ToFallPos2)});
+	kernel.RegisterState("init_pos", static_cast<bitbot::StateId>(States::InitPos), &StateInitPos, {static_cast<bitbot::EventId>(Events::MaintainPos)});
+	
+	kernel.RegisterState("maintain_pos", static_cast<bitbot::StateId>(States::MaintainPos), &StateMaintainPos, {static_cast<bitbot::EventId>(Events::ToFallPos1), static_cast<bitbot::EventId>(Events::ToFallPos2)});
 
 	kernel.RegisterState("to_fall_pos1", static_cast<bitbot::StateId>(States::ToFallPos1), &StateToFallPos1, {});
 

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<reset_positions duration="20.0">
+<reset_positions duration="10.0">
   <!--
     Format:
       - 指定每个关节位置: <joint id="N">POSITION_IN_RADIANS</joint>
@@ -12,17 +12,17 @@
   <!-- 示例：下面列出所有关节的占位值，请按需修改为你的 20 个实际初始位置 -->
   <!-- RLeg1 - 6 -->
   <joint id="12" reset="1">0.0</joint>
-  <joint id="13" reset="1">0.0</joint>
-  <joint id="18" reset="1">-0.13</joint>
-  <joint id="14" reset="1">0.26</joint>
-  <joint id="15" reset="1">-0.13</joint>
+  <joint id="13" reset="1">-0.05</joint>
+  <joint id="18" reset="1">-0.270</joint>
+  <joint id="14" reset="1">0.6</joint>
+  <joint id="15" reset="1">-0.48</joint>
   <joint id="16" reset="1">0.0</joint>
   <!-- LLeg1 - 6 -->
   <joint id="11" reset="1">0.0</joint>
-  <joint id="10" reset="1">0.0</joint>
-  <joint id="19" reset="1">-0.13</joint>
-  <joint id="20" reset="1">0.26</joint>
-  <joint id="22" reset="1">-0.13</joint>
+  <joint id="10" reset="1">0.05</joint>
+  <joint id="19" reset="1">-0.255</joint>
+  <joint id="20" reset="1">0.62</joint>
+  <joint id="22" reset="1">-0.49</joint>
   <joint id="21" reset="1">0.0</joint>
   <!-- RArm1 - 4 -->
   <joint id="6" reset="1">0.0</joint>
