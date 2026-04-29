@@ -5,15 +5,15 @@
   - joint 元素: id 属性为关节 id，元素内容为目标位置（单位与代码中使用的一致，通常为弧度）
   示例中给出六个关节：6,5,7,0（阶段1） 和 14,15,20,22（阶段2）
 -->
-<fall1_positions t1="5.0" t2="5.0">
+<fall1_positions t1="2.0" t2="2.0" deltat="2.0">
   <!-- 阶段1：关节 6,5,7,0 -->
   <!-- <joint id="6" reset="1">0.0</joint> -->
   <!-- <joint id="5" reset="1">1.5</joint> -->
   <!-- <joint id="7" reset="1">0.0</joint> -->
   <!-- <joint id="0" reset="1">1.5</joint> -->
-  <joint id="6">-0.8</joint>
+  <joint id="6">-0.9</joint>
   <joint id="5" reset="1">1.2</joint>
-  <joint id="7">-0.8</joint>
+  <joint id="7">-0.9</joint>
   <joint id="0" reset="1">1.2</joint>
 
   <!-- 阶段2：关节 14, 15, 20, 22 -->

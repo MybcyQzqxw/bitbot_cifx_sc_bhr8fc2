@@ -42,6 +42,7 @@ double reset_duration = 20.0;
 bool fall1_loaded = false;
 double fall1_t1 = 0.0;
 double fall1_t2 = 0.0;
+double fall1_deltat = 0.0;
 std::unordered_map<int, double> fall1_targets;
 
 void SetJointResetPosition(int id, double pos)
@@ -216,13 +217,16 @@ void LoadFall1PositionsFromXML(const std::string &filename)
   // 解析到临时容器，最后验证是否包含所有需要的字段
   double parsed_t1 = 0.0;
   double parsed_t2 = 0.0;
+  double parsed_deltat = 0.0;
   std::unordered_map<int, double> parsed_targets;
 
-  // 根节点属性或元素形式的 t1 / t2
+  // 根节点属性或元素形式的 t1 / t2 / deltat
   std::smatch m_t1_attr;
   std::smatch m_t2_attr;
+  std::smatch m_dt_attr;
   std::regex re_t1_attr(R"(<fall1_positions[^>]*\bt1\s*=\s*\"([\-0-9.eE]+)\"[^>]*>)");
   std::regex re_t2_attr(R"(<fall1_positions[^>]*\bt2\s*=\s*\"([\-0-9.eE]+)\"[^>]*>)");
+  std::regex re_dt_attr(R"(<fall1_positions[^>]*\bdeltat\s*=\s*\"([\-0-9.eE]+)\"[^>]*>)");
   if (std::regex_search(content, m_t1_attr, re_t1_attr))
   {
     try { parsed_t1 = std::stod(m_t1_attr[1].str()); } catch(...) { parsed_t1 = 0.0; }
@@ -249,6 +253,34 @@ void LoadFall1PositionsFromXML(const std::string &filename)
     {
       try { parsed_t2 = std::stod(m_t2_elem[1].str()); } catch(...) { parsed_t2 = 0.0; }
     }
+  }
+
+  // 解析 deltat（可作为属性或元素）
+  if (std::regex_search(content, m_dt_attr, re_dt_attr))
+  {
+    try { /* parsed below */ } catch(...) {}
+  }
+  else
+  {
+    std::smatch m_dt_elem;
+    std::regex re_dt_elem(R"(<deltat>\s*([\-0-9.eE]+)\s*</deltat>)");
+    if (std::regex_search(content, m_dt_elem, re_dt_elem))
+    {
+      try { /* parsed below */ } catch(...) {}
+    }
+  }
+
+  // 提取 deltat 的值（再做一次匹配以统一处理异常）
+  std::smatch m_dt_val;
+  std::regex re_dt_any(R"(<fall1_positions[^>]*\bdeltat\s*=\s*\"([\-0-9.eE]+)\"[^>]*>|<deltat>\s*([\-0-9.eE]+)\s*</deltat>)");
+  if (std::regex_search(content, m_dt_val, re_dt_any))
+  {
+    try
+    {
+      std::string v = m_dt_val[1].matched ? m_dt_val[1].str() : m_dt_val[2].str();
+      parsed_deltat = std::stod(v);
+    }
+    catch(...) { parsed_deltat = 0.0; }
   }
 
   // 解析 joint 条目，格式: <joint id="6">VALUE</joint>
@@ -280,6 +312,11 @@ void LoadFall1PositionsFromXML(const std::string &filename)
     std::cout << "LoadFall1PositionsFromXML: missing or invalid t2" << std::endl;
     ok = false;
   }
+  if (!(parsed_deltat >= 0.0))
+  {
+    std::cout << "LoadFall1PositionsFromXML: missing or invalid deltat" << std::endl;
+    ok = false;
+  }
   for (int id : required_ids)
   {
     if (parsed_targets.find(id) == parsed_targets.end())
@@ -302,6 +339,7 @@ void LoadFall1PositionsFromXML(const std::string &filename)
   // 验证通过：提交到全局变量
   fall1_t1 = parsed_t1;
   fall1_t2 = parsed_t2;
+  fall1_deltat = parsed_deltat;
   fall1_targets = std::move(parsed_targets);
   fall1_loaded = true;
 }
@@ -732,6 +770,9 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
     if (!fall1_loaded)
       std::cout << "StateToFallPos1: fall1_positions.xml not loaded; using fallback t1/t2=" << fallback << std::endl;
   }
+  double deltat = 0.0;
+  if (fall1_loaded)
+    deltat = fall1_deltat;
 
   // 帮助 lambda: 获取目标复位位置（优先使用 joint_reset_positions_*，否则使用硬编码备选值）
   auto get_reset_target = [&](int id) -> double {
@@ -773,7 +814,7 @@ void StateToFallPos1(const bitbot::KernelInterface &kernel, CifxKernel::ExtraDat
     // 两个阶段同时开始，但有各自持续时间 t1 / t2
     if (stage1_set.count(id))
     {
-      double tt = t;
+      double tt = t - deltat; // stage1 starts after deltat
       double s = (tt <= 0.0) ? 0.0 : (1.0 - std::cos(M_PI * std::min(tt, t1) / t1)) / 2.0;
       desired = (tt >= t1) ? final_target : (init_pos + (final_target - init_pos) * s);
     }
